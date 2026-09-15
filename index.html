@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#07090d">
+<title>Beyond Silence · Glass Fruit</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+html,body{margin:0;height:100%;overflow:hidden;background:#07090d;color:#eef3ee;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;touch-action:none}
+body{display:flex;flex-direction:column}
+header{padding:max(14px,env(safe-area-inset-top)) 16px 11px;border-bottom:1px solid #202631;background:#0b0e14}
+.kicker{font:800 9px ui-monospace,SFMono-Regular,monospace;letter-spacing:.16em;color:#9ea9bb}
+h1{margin:4px 0 0;font-size:clamp(26px,8vw,42px);line-height:.9;letter-spacing:-.055em;text-transform:uppercase}
+main{position:relative;flex:1;min-height:0;overflow:hidden;background:radial-gradient(circle at 50% 42%,#151b28 0,transparent 48%),#07090d}
+canvas{position:absolute;inset:0;width:100%;height:100%}
+.copy{position:absolute;left:16px;right:16px;top:16px;pointer-events:none;font:700 11px ui-monospace,SFMono-Regular,monospace;color:#788394;line-height:1.45}
+.copy b{color:#dce4ed}
+.readout{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);min-width:210px;padding:10px 13px;border:1px solid #26303d;border-radius:999px;background:#080b10cc;text-align:center;font:800 10px ui-monospace,SFMono-Regular,monospace;color:#aeb8c4;pointer-events:none;backdrop-filter:blur(7px)}
+.readout strong{color:#eef3ee}
+footer{padding:9px 12px max(10px,env(safe-area-inset-bottom));border-top:1px solid #202631;background:#0b0e14;display:flex;gap:8px}
+button{flex:1;min-height:48px;border:1px solid #293341;border-radius:12px;background:#121720;color:#cbd4df;font:900 11px ui-monospace,SFMono-Regular,monospace;letter-spacing:.06em;touch-action:none}
+button:active{transform:scale(.985);background:#1a2230}
+#mute.on{color:#fff;border-color:#53657c}
+</style>
+</head>
+<body>
+<header><div class="kicker">BEYOND SILENCE · SOUND TOY 001</div><h1>Glass Fruit</h1></header>
+<main id="stage">
+<canvas id="c"></canvas>
+<div class="copy"><b>TOUCH THE DARK.</b><br>Left ↔ right changes pitch.<br>Up ↕ down changes the material.</div>
+<div class="readout" id="readout">tap to wake the instrument</div>
+</main>
+<footer><button id="pluck">PLUCK</button><button id="mute">MUTE</button></footer>
+<script>
+(()=>{
+const stage=document.getElementById('stage'),c=document.getElementById('c'),ctx=c.getContext('2d'),readout=document.getElementById('readout'),pluckBtn=document.getElementById('pluck'),muteBtn=document.getElementById('mute');
+let ac=null,master=null,filter=null,oscA=null,oscB=null,gain=null,noise=null,noiseGain=null,active=false,muted=false,x=.5,y=.5,lastX=.5,lastY=.5,rings=[];
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function audio(){
+ if(ac)return;
+ ac=new (window.AudioContext||window.webkitAudioContext)();
+ master=ac.createGain(); master.gain.value=.42; master.connect(ac.destination);
+ filter=ac.createBiquadFilter(); filter.type='lowpass'; filter.Q.value=7; filter.connect(master);
+ gain=ac.createGain(); gain.gain.value=0; gain.connect(filter);
+ oscA=ac.createOscillator(); oscA.type='sine'; oscA.connect(gain); oscA.start();
+ oscB=ac.createOscillator(); oscB.type='triangle'; oscB.detune.value=7; oscB.connect(gain); oscB.start();
+ const buf=ac.createBuffer(1,ac.sampleRate*2,ac.sampleRate),d=buf.getChannelData(0); for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+ noise=ac.createBufferSource(); noise.buffer=buf; noise.loop=true; noiseGain=ac.createGain(); noiseGain.gain.value=0; noise.connect(noiseGain); noiseGain.connect(filter); noise.start();
+}
+function freqFromX(v){const lo=92,hi=920;return lo*Math.pow(hi/lo,v)}
+function setSound(px,py,on=true){
+ audio(); if(ac.state==='suspended')ac.resume(); x=clamp(px,0,1);y=clamp(py,0,1);
+ const now=ac.currentTime,f=freqFromX(x),bright=500+Math.pow(1-y,2)*6200,glass=Math.pow(1-y,1.5);
+ oscA.frequency.setTargetAtTime(f,now,.02); oscB.frequency.setTargetAtTime(f*2.002,now,.03);
+ filter.frequency.setTargetAtTime(bright,now,.025); filter.Q.setTargetAtTime(3+glass*13,now,.04);
+ noiseGain.gain.setTargetAtTime(on ? .012*(.15+glass) : 0,now,.03);
+ gain.gain.cancelScheduledValues(now); gain.gain.setTargetAtTime(on ? .055+.035*glass : 0,now,on?.025:.06);
+ const names=['velvet','wood','ceramic','glass']; let m=names[Math.min(3,Math.floor((1-y)*4))];
+ readout.innerHTML=`<strong>${Math.round(f)} Hz</strong> · ${m}`;
+}
+function release(){if(!ac)return;active=false;let n=ac.currentTime;gain.gain.setTargetAtTime(0,n,.09);noiseGain.gain.setTargetAtTime(0,n,.07)}
+function point(e){let r=stage.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]}
+function wakeRing(px,py,force=1){rings.push({x:px,y:py,r:4,a:.8*force,v:55+80*force});if(rings.length>18)rings.shift()}
+stage.addEventListener('pointerdown',e=>{e.preventDefault();stage.setPointerCapture?.(e.pointerId);active=true;let p=point(e);lastX=p[0];lastY=p[1];setSound(p[0],p[1],true);wakeRing(e.clientX,e.clientY,1)});
+stage.addEventListener('pointermove',e=>{if(!active)return;e.preventDefault();let p=point(e),speed=Math.hypot(p[0]-lastX,p[1]-lastY);setSound(p[0],p[1],true);if(speed>.018)wakeRing(e.clientX,e.clientY,clamp(speed*8,.25,1));lastX=p[0];lastY=p[1]});
+stage.addEventListener('pointerup',release);stage.addEventListener('pointercancel',release);
+function pluck(){audio();if(ac.state==='suspended')ac.resume();let n=ac.currentTime,f=freqFromX(x),o=ac.createOscillator(),g=ac.createGain(),bp=ac.createBiquadFilter();o.type='triangle';o.frequency.value=f*(1.5+Math.random()*.5);bp.type='bandpass';bp.frequency.value=900+(1-y)*5200;bp.Q.value=12;g.gain.setValueAtTime(.18,n);g.gain.exponentialRampToValueAtTime(.0001,n+.38);o.connect(bp);bp.connect(g);g.connect(master);o.start(n);o.stop(n+.42);wakeRing(innerWidth*.5,stage.getBoundingClientRect().top+stage.clientHeight*.5,1.4)}
+pluckBtn.addEventListener('pointerdown',e=>{e.preventDefault();pluck()});
+muteBtn.addEventListener('pointerdown',e=>{e.preventDefault();audio();muted=!muted;master.gain.setTargetAtTime(muted?0:.42,ac.currentTime,.04);muteBtn.classList.toggle('on',muted);muteBtn.textContent=muted?'UNMUTE':'MUTE'});
+function resize(){let d=Math.min(devicePixelRatio||1,2),r=stage.getBoundingClientRect();c.width=r.width*d;c.height=r.height*d;ctx.setTransform(d,0,0,d,0,0)}
+function draw(t){let w=stage.clientWidth,h=stage.clientHeight;ctx.clearRect(0,0,w,h);let gx=x*w,gy=y*h;
+ ctx.globalAlpha=.9;ctx.lineWidth=1.2;for(let i=0;i<8;i++){let a=t*.00025+i*.78,rr=24+i*18+(Math.sin(t*.001+i)*5),px=gx+Math.cos(a)*rr*.18,py=gy+Math.sin(a*1.3)*rr*.12;ctx.strokeStyle=`rgba(180,205,230,${.15+i*.025})`;ctx.beginPath();ctx.arc(px,py,rr,0,Math.PI*2);ctx.stroke()}
+ for(let i=rings.length-1;i>=0;i--){let q=rings[i];q.r+=q.v/60;q.a*=.965;if(q.a<.025){rings.splice(i,1);continue}ctx.strokeStyle=`rgba(225,238,249,${q.a})`;ctx.lineWidth=1.4;ctx.beginPath();ctx.arc(q.x,q.y-stage.getBoundingClientRect().top,q.r,0,Math.PI*2);ctx.stroke()}
+ requestAnimationFrame(draw)}
+new ResizeObserver(resize).observe(stage);resize();requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
